@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>全球行业关系图</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1018;
+    --bg2: #141a26;
+    --panel: #161c28;
+    --line: #283142;
+    --text: #e8eaf0;
+    --muted: #8b93a7;
+    --accent: #5B8FF9;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    background: radial-gradient(1200px 800px at 30% 0%, #18223a 0%, var(--bg) 60%);
+    color: var(--text);
+    overflow: hidden;
+  }
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    padding: 16px 22px;
+    display: flex; align-items: baseline; gap: 14px;
+    pointer-events: none;
+  }
+  #topbar h1 { font-size: 19px; font-weight: 700; letter-spacing: .5px; }
+  #topbar .hint { font-size: 12.5px; color: var(--muted); }
+  #chart { width: 100%; height: 100%; }
+
+  /* 详情面板 */
+  #panel {
+    position: fixed; top: 0; right: 0; height: 100%;
+    width: 420px; max-width: 92vw;
+    background: linear-gradient(180deg, var(--bg2) 0%, var(--panel) 100%);
+    border-left: 1px solid var(--line);
+    box-shadow: -18px 0 50px rgba(0,0,0,.45);
+    transform: translateX(105%);
+    transition: transform .32s cubic-bezier(.22,.61,.36,1);
+    z-index: 20;
+    display: flex; flex-direction: column;
+  }
+  #panel.open { transform: translateX(0); }
+  .p-head {
+    padding: 22px 22px 16px; border-bottom: 1px solid var(--line);
+    position: relative;
+  }
+  .p-tag {
+    display: inline-block; font-size: 11px; letter-spacing: 2px;
+    color: var(--muted); margin-bottom: 8px; text-transform: uppercase;
+  }
+  .p-title { font-size: 22px; font-weight: 800; }
+  .p-intro { margin-top: 10px; font-size: 13.5px; line-height: 1.7; color: #c7cdda; }
+  .p-close {
+    position: absolute; top: 18px; right: 18px;
+    width: 30px; height: 30px; border-radius: 8px;
+    background: #222b3b; border: 1px solid var(--line); color: var(--muted);
+    cursor: pointer; font-size: 17px; line-height: 1; pointer-events: auto;
+  }
+  .p-close:hover { color: var(--text); background: #2c3950; }
+  .p-body { padding: 12px 16px 40px; overflow-y: auto; flex: 1; }
+
+  .field { border: 1px solid var(--line); border-radius: 12px; margin: 10px 0; overflow: hidden; background: rgba(255,255,255,.015); }
+  .field-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 13px 15px; cursor: pointer; user-select: none;
+  }
+  .field-head:hover { background: rgba(255,255,255,.03); }
+  .field-name { font-size: 14.5px; font-weight: 600; }
+  .field-name .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:9px; vertical-align: middle; }
+  .field-meta { font-size: 11.5px; color: var(--muted); display:flex; align-items:center; gap:8px; }
+  .chev { transition: transform .25s; color: var(--muted); font-size: 12px; }
+  .field.open .chev { transform: rotate(90deg); }
+  .field-body { max-height: 0; overflow: hidden; transition: max-height .3s ease; }
+  .field.open .field-body { max-height: 1600px; }
+  .field-inner { padding: 4px 13px 13px; }
+
+  .company { display: block; text-decoration: none; color: inherit; padding: 11px 12px; border-radius: 9px; background: #10151f; border: 1px solid #222b3b; margin: 8px 0; cursor: pointer; transition: border-color .15s, background .15s; }
+  .company:hover { border-color: #3a4a66; background: #131b29; }
+  .c-link { display: block; margin-top: 8px; font-size: 11px; color: #5B8FF9; opacity: 0; transition: opacity .15s; }
+  .company:hover .c-link { opacity: .95; }
+  .c-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .c-name { font-size: 13.5px; font-weight: 700; }
+  .ticker { font-size: 10.5px; font-weight: 700; color: #cdd6e8; background: #2a3850; padding: 2px 7px; border-radius: 5px; letter-spacing: .5px; }
+  .loc { font-size: 13px; }
+  .c-desc { margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+
+  .legend-note { position: fixed; bottom: 14px; left: 22px; font-size: 11.5px; color: var(--muted); z-index: 5; }
+  #panel .p-body::-webkit-scrollbar { width: 8px; }
+  #panel .p-body::-webkit-scrollbar-thumb { background: #2c3950; border-radius: 4px; }
+
+  /* 实时股价徽章 */
+  .quote { margin-left: auto; display: inline-flex; align-items: baseline; gap: 7px; font-size: 12px; white-space: nowrap; }
+  .q-price { font-weight: 700; color: #e8eaf0; }
+  .q-chg { font-weight: 700; font-size: 11.5px; }
+  .q-chg.up { color: #3fd07f; }
+  .q-chg.down { color: #ff6b6b; }
+  .q-load { color: #5a6377; letter-spacing: 1px; }
+  .q-na { color: #4d5567; font-size: 11px; }
+
+  /* API Key 设置条 */
+  #key-banner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+    display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 11px 18px; background: #1b2536; border-bottom: 1px solid #2c3950;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4); font-size: 13px;
+  }
+  #key-banner b { color: #5B8FF9; }
+  #key-banner .kb-text { color: #c7cdda; }
+  #key-banner a { color: #61DDAA; text-decoration: none; }
+  #key-banner a:hover { text-decoration: underline; }
+  #key-input {
+    flex: 1; min-width: 180px; max-width: 360px;
+    background: #0e131d; border: 1px solid #2c3950; color: #e8eaf0;
+    padding: 7px 11px; border-radius: 8px; font-size: 13px; outline: none;
+  }
+  #key-input:focus { border-color: #5B8FF9; }
+  .kb-btn { background: #5B8FF9; color: #fff; border: none; cursor: pointer; padding: 7px 15px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+  .kb-btn.ghost { background: #2a3850; }
+  #gear {
+    position: fixed; bottom: 14px; right: 18px; z-index: 6;
+    width: 38px; height: 38px; border-radius: 10px;
+    background: #1b2536; border: 1px solid #2c3950; color: #aeb6c8;
+    cursor: pointer; font-size: 17px; line-height: 1;
+  }
+  #gear:hover { color: #fff; background: #243049; }
+</style>
+</head>
+<body>
+  <div id="key-banner">
+    <span class="kb-text">💹 <b>美股</b>实时价需要免费 Finnhub Key（A股/港股已免 Key 直连）：<a href="https://finnhub.io/register" target="_blank">点此 1 分钟注册获取 →</a></span>
+    <input id="key-input" type="text" placeholder="在此粘贴 Finnhub API Key" />
+    <button class="kb-btn" onclick="saveKey()">保存并启用</button>
+    <button class="kb-btn ghost" onclick="hideBanner()">稍后</button>
+  </div>
+  <div id="topbar">
+    <h1>🌐 全球行业关系图</h1>
+    <span class="hint">点击行业节点查看细分领域与代表公司 · 可拖动节点 / 滚轮缩放</span>
+  </div>
+  <div id="chart"></div>
+  <div class="legend-note">实时股价：美股/ADR 由 Finnhub（$）· A股/港股 由腾讯（¥/HK$，免Key）· 每 60 秒刷新 · 未上市标的显示 —</div>
+  <button id="gear" title="设置 / 更换 API Key" onclick="showBanner()">⚙</button>
+
+  <div id="panel">
+    <div class="p-head">
+      <button class="p-close" onclick="closePanel()">✕</button>
+      <span class="p-tag" id="p-tag">INDUSTRY</span>
+      <div class="p-title" id="p-title"></div>
+      <div class="p-intro" id="p-intro"></div>
+    </div>
+    <div class="p-body" id="p-body"></div>
+  </div>
+
+<script>
+/* =========================================================
+   数据：12 大行业 → 细分领域 → 代表公司（全球）
+   ticker 仅供参考；未上市公司标注「未上市」
+   ========================================================= */
+const DATA = [
+  { id:'tech', name:'科技 / 信息技术', color:'#5B8FF9',
+    intro:'数字经济的底层引擎，从芯片、软件到 AI 与互联网平台，渗透并赋能几乎所有其他行业。',
+    fields:[
+      { name:'半导体', companies:[
+        {name:'英伟达', ticker:'NVDA', loc:'🇺🇸', desc:'AI 芯片龙头，GPU 主导数据中心算力。'},
+        {name:'台积电', ticker:'TSM', loc:'🇹🇼', desc:'全球最大晶圆代工厂，先进制程领跑。'},
+        {name:'ASML', ticker:'ASML', loc:'🇳🇱', desc:'垄断 EUV 光刻机，先进芯片制造命门。'},
+        {name:'博通', ticker:'AVGO', loc:'🇺🇸', desc:'网络与定制芯片，AI 数据中心核心供应商。'},
+      ]},
+      { name:'软件与云服务', companies:[
+        {name:'微软', ticker:'MSFT', loc:'🇺🇸', desc:'Windows/Office 与 Azure 云，深度绑定 OpenAI。'},
+        {name:'甲骨文', ticker:'ORCL', loc:'🇺🇸', desc:'数据库巨头，云基础设施快速增长。'},
+        {name:'Salesforce', ticker:'CRM', loc:'🇺🇸', desc:'全球最大 CRM 与企业 SaaS 平台。'},
+        {name:'SAP', ticker:'SAP', loc:'🇩🇪', desc:'欧洲软件龙头，企业 ERP 标准。'},
+      ]},
+      { name:'互联网平台', companies:[
+        {name:'Alphabet（谷歌）', ticker:'GOOGL', loc:'🇺🇸', desc:'搜索/广告/YouTube/云，AI 全栈布局。'},
+        {name:'Meta', ticker:'META', loc:'🇺🇸', desc:'Facebook/Instagram/WhatsApp 社交广告帝国。'},
+        {name:'亚马逊', ticker:'AMZN', loc:'🇺🇸', desc:'电商 + AWS 云计算双引擎。'},
+        {name:'腾讯', ticker:'0700.HK', loc:'🇨🇳', desc:'微信生态、游戏与投资版图。'},
+      ]},
+      { name:'人工智能', companies:[
+        {name:'英伟达', ticker:'NVDA', loc:'🇺🇸', desc:'AI 训练/推理算力事实标准。'},
+        {name:'OpenAI', ticker:'未上市', loc:'🇺🇸', desc:'ChatGPT 缔造者，生成式 AI 引领者。'},
+        {name:'微软', ticker:'MSFT', loc:'🇺🇸', desc:'Copilot 全线整合，AI 商业化先锋。'},
+        {name:'谷歌', ticker:'GOOGL', loc:'🇺🇸', desc:'Gemini 模型与自研 TPU 芯片。'},
+      ]},
+      { name:'消费电子 / 硬件', companies:[
+        {name:'苹果', ticker:'AAPL', loc:'🇺🇸', desc:'iPhone 生态，全球最赚钱硬件公司。'},
+        {name:'三星电子', ticker:'005930', loc:'🇰🇷', desc:'手机/存储芯片/面板一体化巨头。'},
+        {name:'小米', ticker:'1810.HK', loc:'🇨🇳', desc:'手机 + IoT + 造车的硬件生态。'},
+      ]},
+      { name:'网络安全', companies:[
+        {name:'CrowdStrike', ticker:'CRWD', loc:'🇺🇸', desc:'云原生终端安全，威胁检测领先。'},
+        {name:'Palo Alto Networks', ticker:'PANW', loc:'🇺🇸', desc:'网络安全平台化龙头。'},
+        {name:'Fortinet', ticker:'FTNT', loc:'🇺🇸', desc:'防火墙与一体化安全设备。'},
+      ]},
+    ]},
+
+  { id:'finance', name:'金融', color:'#2EC7C9',
+    intro:'资金的配置与流动中枢，连接储蓄与投资，支撑实体经济运转，并与科技深度融合催生金融科技。',
+    fields:[
+      { name:'银行', companies:[
+        {name:'摩根大通', ticker:'JPM', loc:'🇺🇸', desc:'美国最大银行，业务全覆盖。'},
+        {name:'工商银行', ticker:'601398', loc:'🇨🇳', desc:'按资产全球最大商业银行。'},
+        {name:'汇丰', ticker:'HSBA', loc:'🇬🇧', desc:'横跨欧亚的国际化银行集团。'},
+      ]},
+      { name:'投行与资产管理', companies:[
+        {name:'高盛', ticker:'GS', loc:'🇺🇸', desc:'顶级投资银行，并购与交易标杆。'},
+        {name:'贝莱德', ticker:'BLK', loc:'🇺🇸', desc:'全球最大资管，管理逾 10 万亿美元。'},
+        {name:'黑石', ticker:'BX', loc:'🇺🇸', desc:'全球最大另类投资/私募股权。'},
+      ]},
+      { name:'支付', companies:[
+        {name:'Visa', ticker:'V', loc:'🇺🇸', desc:'全球最大支付网络。'},
+        {name:'万事达', ticker:'MA', loc:'🇺🇸', desc:'第二大卡组织，跨境支付强势。'},
+        {name:'PayPal', ticker:'PYPL', loc:'🇺🇸', desc:'线上支付与数字钱包先驱。'},
+      ]},
+      { name:'保险', companies:[
+        {name:'伯克希尔', ticker:'BRK.B', loc:'🇺🇸', desc:'巴菲特旗下保险 + 多元投资。'},
+        {name:'中国平安', ticker:'601318', loc:'🇨🇳', desc:'保险为核心的综合金融科技集团。'},
+        {name:'安联', ticker:'ALV', loc:'🇩🇪', desc:'欧洲最大保险与资管集团。'},
+      ]},
+      { name:'金融科技', companies:[
+        {name:'Stripe', ticker:'未上市', loc:'🇺🇸', desc:'开发者友好的在线支付基础设施。'},
+        {name:'蚂蚁集团', ticker:'未上市', loc:'🇨🇳', desc:'支付宝与数字金融平台。'},
+        {name:'Block', ticker:'XYZ', loc:'🇺🇸', desc:'Square 收单与 Cash App。'},
+      ]},
+    ]},
+
+  { id:'healthcare', name:'医疗健康', color:'#F6BD16',
+    intro:'守护生命与健康的行业，涵盖制药、生物科技、器械与医疗服务，受人口老龄化与技术创新双轮驱动。',
+    fields:[
+      { name:'制药', companies:[
+        {name:'礼来', ticker:'LLY', loc:'🇺🇸', desc:'减肥/糖尿病药 GLP-1 引爆增长。'},
+        {name:'诺和诺德', ticker:'NVO', loc:'🇩🇰', desc:'司美格鲁肽（Wegovy/Ozempic）制造商。'},
+        {name:'强生', ticker:'JNJ', loc:'🇺🇸', desc:'制药 + 医疗器械多元巨头。'},
+        {name:'辉瑞', ticker:'PFE', loc:'🇺🇸', desc:'老牌制药，疫苗与创新药并重。'},
+      ]},
+      { name:'生物科技', companies:[
+        {name:'安进', ticker:'AMGN', loc:'🇺🇸', desc:'生物制药先驱，多款重磅药物。'},
+        {name:'再生元', ticker:'REGN', loc:'🇺🇸', desc:'抗体药物研发实力强劲。'},
+        {name:'Moderna', ticker:'MRNA', loc:'🇺🇸', desc:'mRNA 技术平台代表。'},
+      ]},
+      { name:'医疗器械', companies:[
+        {name:'美敦力', ticker:'MDT', loc:'🇺🇸', desc:'全球最大医疗器械公司。'},
+        {name:'直觉外科', ticker:'ISRG', loc:'🇺🇸', desc:'达芬奇手术机器人垄断者。'},
+        {name:'雅培', ticker:'ABT', loc:'🇺🇸', desc:'诊断、器械与营养品。'},
+      ]},
+      { name:'医疗服务与保险', companies:[
+        {name:'联合健康', ticker:'UNH', loc:'🇺🇸', desc:'美国最大健康保险与医疗服务。'},
+        {name:'CVS Health', ticker:'CVS', loc:'🇺🇸', desc:'药房 + 保险 + 医疗一体化。'},
+      ]},
+    ]},
+
+  { id:'consumer', name:'消费', color:'#F08BB4',
+    intro:'直接面向终端用户的庞大行业，从日常必需品到奢侈品、零售与电商，反映经济景气与生活方式变迁。',
+    fields:[
+      { name:'必需消费品', companies:[
+        {name:'宝洁', ticker:'PG', loc:'🇺🇸', desc:'日化巨头，旗下品牌遍布全球。'},
+        {name:'雀巢', ticker:'NESN', loc:'🇨🇭', desc:'全球最大食品饮料公司。'},
+        {name:'可口可乐', ticker:'KO', loc:'🇺🇸', desc:'全球饮料品牌标杆。'},
+      ]},
+      { name:'零售', companies:[
+        {name:'沃尔玛', ticker:'WMT', loc:'🇺🇸', desc:'全球营收最高的零售商。'},
+        {name:'好市多', ticker:'COST', loc:'🇺🇸', desc:'会员制仓储零售典范。'},
+      ]},
+      { name:'奢侈品', companies:[
+        {name:'LVMH', ticker:'MC', loc:'🇫🇷', desc:'路易威登等 75+ 奢侈品牌集团。'},
+        {name:'爱马仕', ticker:'RMS', loc:'🇫🇷', desc:'顶级奢侈品，铂金包稀缺性标杆。'},
+      ]},
+      { name:'电商', companies:[
+        {name:'亚马逊', ticker:'AMZN', loc:'🇺🇸', desc:'全球电商与云计算龙头。'},
+        {name:'阿里巴巴', ticker:'BABA', loc:'🇨🇳', desc:'淘宝天猫与云的电商生态。'},
+        {name:'拼多多', ticker:'PDD', loc:'🇨🇳', desc:'拼团模式 + 海外 Temu 高速扩张。'},
+      ]},
+      { name:'餐饮与运动服饰', companies:[
+        {name:'麦当劳', ticker:'MCD', loc:'🇺🇸', desc:'全球最大快餐连锁。'},
+        {name:'耐克', ticker:'NKE', loc:'🇺🇸', desc:'全球运动鞋服第一品牌。'},
+        {name:'星巴克', ticker:'SBUX', loc:'🇺🇸', desc:'全球连锁咖啡龙头。'},
+      ]},
+    ]},
+
+  { id:'energy', name:'能源', color:'#FF9845',
+    intro:'驱动现代文明的动力源，正经历从化石能源向新能源的历史性转型，与汽车、材料、公用事业紧密耦合。',
+    fields:[
+      { name:'油气', companies:[
+        {name:'沙特阿美', ticker:'2222', loc:'🇸🇦', desc:'全球产量与利润最高的石油公司。'},
+        {name:'埃克森美孚', ticker:'XOM', loc:'🇺🇸', desc:'美国最大综合性石油公司。'},
+        {name:'雪佛龙', ticker:'CVX', loc:'🇺🇸', desc:'全球一体化能源巨头。'},
+      ]},
+      { name:'油服与设备', companies:[
+        {name:'斯伦贝谢', ticker:'SLB', loc:'🇺🇸', desc:'全球最大油田技术服务商。'},
+        {name:'哈里伯顿', ticker:'HAL', loc:'🇺🇸', desc:'压裂等油气工程服务龙头。'},
+      ]},
+      { name:'光伏与新能源', companies:[
+        {name:'隆基绿能', ticker:'601012', loc:'🇨🇳', desc:'全球最大单晶硅光伏制造商。'},
+        {name:'First Solar', ticker:'FSLR', loc:'🇺🇸', desc:'美国薄膜光伏组件龙头。'},
+        {name:'阳光电源', ticker:'300274', loc:'🇨🇳', desc:'光伏逆变器与储能领先者。'},
+      ]},
+      { name:'风电', companies:[
+        {name:'维斯塔斯', ticker:'VWS', loc:'🇩🇰', desc:'全球最大风力发电机制造商。'},
+        {name:'西门子能源', ticker:'ENR', loc:'🇩🇪', desc:'风电与电网设备综合供应商。'},
+      ]},
+    ]},
+
+  { id:'industrials', name:'工业制造', color:'#7262FD',
+    intro:'实体经济的脊梁，涵盖航空航天、机械、自动化与物流，承接科技升级并向智能制造演进。',
+    fields:[
+      { name:'航空航天与国防', companies:[
+        {name:'波音', ticker:'BA', loc:'🇺🇸', desc:'与空客双寡头的大飞机制造商。'},
+        {name:'空中客车', ticker:'AIR', loc:'🇫🇷', desc:'欧洲航空巨头，民机交付领先。'},
+        {name:'洛克希德·马丁', ticker:'LMT', loc:'🇺🇸', desc:'全球最大国防军工承包商。'},
+      ]},
+      { name:'机械设备', companies:[
+        {name:'卡特彼勒', ticker:'CAT', loc:'🇺🇸', desc:'全球最大工程机械制造商。'},
+        {name:'迪尔', ticker:'DE', loc:'🇺🇸', desc:'农业机械龙头，智能农机引领者。'},
+        {name:'西门子', ticker:'SIE', loc:'🇩🇪', desc:'工业、能源、医疗多元集团。'},
+      ]},
+      { name:'工业自动化', companies:[
+        {name:'ABB', ticker:'ABBN', loc:'🇨🇭', desc:'电气化与机器人自动化领先者。'},
+        {name:'罗克韦尔自动化', ticker:'ROK', loc:'🇺🇸', desc:'工厂自动化纯正龙头。'},
+        {name:'发那科', ticker:'6954', loc:'🇯🇵', desc:'工业机器人与数控系统巨头。'},
+      ]},
+      { name:'物流运输', companies:[
+        {name:'UPS', ticker:'UPS', loc:'🇺🇸', desc:'全球最大包裹快递公司。'},
+        {name:'FedEx', ticker:'FDX', loc:'🇺🇸', desc:'航空快递与全球物流网络。'},
+      ]},
+    ]},
+
+  { id:'comm', name:'通信服务', color:'#36CFC9',
+    intro:'连接人与内容的行业，涵盖电信网络、媒体娱乐、游戏与社交平台，是数字内容与流量的主战场。',
+    fields:[
+      { name:'电信运营', companies:[
+        {name:'AT&T', ticker:'T', loc:'🇺🇸', desc:'美国老牌电信运营商。'},
+        {name:'Verizon', ticker:'VZ', loc:'🇺🇸', desc:'美国网络质量领先的运营商。'},
+        {name:'中国移动', ticker:'0941.HK', loc:'🇨🇳', desc:'全球用户最多的电信运营商。'},
+      ]},
+      { name:'媒体与流媒体', companies:[
+        {name:'奈飞', ticker:'NFLX', loc:'🇺🇸', desc:'全球流媒体订阅龙头。'},
+        {name:'迪士尼', ticker:'DIS', loc:'🇺🇸', desc:'IP/影视/乐园/流媒体帝国。'},
+        {name:'Comcast', ticker:'CMCSA', loc:'🇺🇸', desc:'有线宽带与环球影业。'},
+      ]},
+      { name:'游戏', companies:[
+        {name:'腾讯', ticker:'0700.HK', loc:'🇨🇳', desc:'全球营收最大的游戏公司。'},
+        {name:'索尼', ticker:'6758', loc:'🇯🇵', desc:'PlayStation 主机与游戏生态。'},
+        {name:'任天堂', ticker:'7974', loc:'🇯🇵', desc:'Switch 与马里奥等顶级 IP。'},
+      ]},
+      { name:'社交平台', companies:[
+        {name:'Meta', ticker:'META', loc:'🇺🇸', desc:'全球最大社交媒体集团。'},
+        {name:'字节跳动', ticker:'未上市', loc:'🇨🇳', desc:'抖音/TikTok 短视频全球霸主。'},
+      ]},
+    ]},
+
+  { id:'materials', name:'材料', color:'#9254DE',
+    intro:'一切制造的源头，涵盖化工、金属采矿与新能源材料，为工业、能源、汽车提供基础原料。',
+    fields:[
+      { name:'化工', companies:[
+        {name:'巴斯夫', ticker:'BAS', loc:'🇩🇪', desc:'全球最大综合化工企业。'},
+        {name:'林德', ticker:'LIN', loc:'🇮🇪', desc:'全球最大工业气体供应商。'},
+        {name:'陶氏', ticker:'DOW', loc:'🇺🇸', desc:'材料科学与基础化学品龙头。'},
+      ]},
+      { name:'金属与采矿', companies:[
+        {name:'必和必拓', ticker:'BHP', loc:'🇦🇺', desc:'全球最大矿业公司，铁矿/铜。'},
+        {name:'力拓', ticker:'RIO', loc:'🇬🇧', desc:'铁矿石与铝业巨头。'},
+        {name:'自由港', ticker:'FCX', loc:'🇺🇸', desc:'全球主要铜矿生产商。'},
+      ]},
+      { name:'锂电材料', companies:[
+        {name:'雅保', ticker:'ALB', loc:'🇺🇸', desc:'全球最大锂生产商之一。'},
+        {name:'赣锋锂业', ticker:'002460', loc:'🇨🇳', desc:'中国锂化合物龙头。'},
+        {name:'SQM', ticker:'SQM', loc:'🇨🇱', desc:'智利盐湖提锂巨头。'},
+      ]},
+    ]},
+
+  { id:'utilities', name:'公用事业', color:'#5AD8A6',
+    intro:'提供电力、水、燃气等基础民生服务，现金流稳定，正成为能源转型与电网升级的关键载体。',
+    fields:[
+      { name:'电力', companies:[
+        {name:'NextEra Energy', ticker:'NEE', loc:'🇺🇸', desc:'全球最大可再生能源发电商。'},
+        {name:'杜克能源', ticker:'DUK', loc:'🇺🇸', desc:'美国大型受监管电力公司。'},
+      ]},
+      { name:'可再生电力', companies:[
+        {name:'Iberdrola', ticker:'IBE', loc:'🇪🇸', desc:'欧洲可再生能源电力龙头。'},
+        {name:'Ørsted', ticker:'ORSTED', loc:'🇩🇰', desc:'全球海上风电开发领导者。'},
+      ]},
+      { name:'水务与燃气', companies:[
+        {name:'American Water', ticker:'AWK', loc:'🇺🇸', desc:'美国最大上市水务公司。'},
+      ]},
+    ]},
+
+  { id:'realestate', name:'房地产', color:'#D4843E',
+    intro:'土地与不动产的开发与运营，正从传统住宅向数据中心、物流仓储等新型 REITs 演化。',
+    fields:[
+      { name:'物流与工业地产', companies:[
+        {name:'Prologis', ticker:'PLD', loc:'🇺🇸', desc:'全球最大物流地产 REIT。'},
+      ]},
+      { name:'数据中心地产', companies:[
+        {name:'Equinix', ticker:'EQIX', loc:'🇺🇸', desc:'全球最大数据中心互联 REIT。'},
+        {name:'Digital Realty', ticker:'DLR', loc:'🇺🇸', desc:'大型数据中心地产运营商。'},
+        {name:'美国电塔', ticker:'AMT', loc:'🇺🇸', desc:'全球最大通信铁塔 REIT。'},
+      ]},
+      { name:'住宅与商业开发', companies:[
+        {name:'万科', ticker:'000002', loc:'🇨🇳', desc:'中国头部住宅开发商。'},
+        {name:'西蒙地产', ticker:'SPG', loc:'🇺🇸', desc:'美国最大购物中心 REIT。'},
+      ]},
+    ]},
+
+  { id:'auto', name:'汽车与出行', color:'#F5546B',
+    intro:'百年汽车工业正被电动化、智能化与共享出行重塑，是科技、能源、材料交汇的超级赛道。',
+    fields:[
+      { name:'传统整车', companies:[
+        {name:'丰田', ticker:'7203', loc:'🇯🇵', desc:'全球销量第一的汽车制造商。'},
+        {name:'大众', ticker:'VOW3', loc:'🇩🇪', desc:'欧洲最大汽车集团。'},
+      ]},
+      { name:'电动车', companies:[
+        {name:'特斯拉', ticker:'TSLA', loc:'🇺🇸', desc:'电动车与自动驾驶引领者。'},
+        {name:'比亚迪', ticker:'002594', loc:'🇨🇳', desc:'全球新能源车销量领先，电池自产。'},
+        {name:'蔚来', ticker:'NIO', loc:'🇨🇳', desc:'换电模式高端电动车。'},
+      ]},
+      { name:'核心零部件', companies:[
+        {name:'宁德时代', ticker:'300750', loc:'🇨🇳', desc:'全球最大动力电池制造商。'},
+        {name:'博世', ticker:'未上市', loc:'🇩🇪', desc:'全球最大汽车零部件供应商。'},
+      ]},
+      { name:'出行平台', companies:[
+        {name:'Uber', ticker:'UBER', loc:'🇺🇸', desc:'全球最大网约车与外卖平台。'},
+        {name:'滴滴', ticker:'未上市', loc:'🇨🇳', desc:'中国网约车出行龙头。'},
+      ]},
+    ]},
+
+  { id:'agrifood', name:'农业与食品', color:'#5CA641',
+    intro:'最古老也最刚需的行业，从种子化肥到农产品贸易与食品加工，支撑全球粮食安全与日常餐桌。',
+    fields:[
+      { name:'农业综合贸易', companies:[
+        {name:'嘉吉', ticker:'未上市', loc:'🇺🇸', desc:'全球最大私营农产品贸易商。'},
+        {name:'ADM', ticker:'ADM', loc:'🇺🇸', desc:'全球粮食加工与贸易巨头。'},
+        {name:'邦吉', ticker:'BG', loc:'🇺🇸', desc:'油籽压榨与农产品贸易龙头。'},
+      ]},
+      { name:'种子与化肥', companies:[
+        {name:'拜耳', ticker:'BAYN', loc:'🇩🇪', desc:'收购孟山都后的种子与农化巨头。'},
+        {name:'科迪华', ticker:'CTVA', loc:'🇺🇸', desc:'种子与作物保护纯农业公司。'},
+        {name:'Nutrien', ticker:'NTR', loc:'🇨🇦', desc:'全球最大钾肥与农资零售商。'},
+      ]},
+      { name:'食品加工', companies:[
+        {name:'雀巢', ticker:'NESN', loc:'🇨🇭', desc:'全球最大食品饮料企业。'},
+        {name:'亿滋', ticker:'MDLZ', loc:'🇺🇸', desc:'奥利奥等全球零食巨头。'},
+      ]},
+    ]},
+];
+
+// 行业间关系（连线 + 关系标签）
+const LINKS = [
+  {s:'tech', t:'finance', r:'金融科技'},
+  {s:'tech', t:'healthcare', r:'AI 制药 / 数字医疗'},
+  {s:'tech', t:'auto', r:'自动驾驶 / 智能座舱'},
+  {s:'tech', t:'comm', r:'云与互联网'},
+  {s:'tech', t:'industrials', r:'智能制造'},
+  {s:'tech', t:'realestate', r:'数据中心'},
+  {s:'finance', t:'realestate', r:'地产金融 / REITs'},
+  {s:'finance', t:'consumer', r:'支付 / 消费信贷'},
+  {s:'energy', t:'auto', r:'动力电池 / 新能源车'},
+  {s:'energy', t:'materials', r:'锂电材料'},
+  {s:'energy', t:'utilities', r:'发电与电网'},
+  {s:'energy', t:'industrials', r:'能源装备'},
+  {s:'industrials', t:'materials', r:'原材料'},
+  {s:'consumer', t:'agrifood', r:'食品供应链'},
+  {s:'consumer', t:'comm', r:'媒体与广告'},
+  {s:'healthcare', t:'consumer', r:'保健消费'},
+  {s:'auto', t:'materials', r:'金属 / 锂'},
+];
+
+/* ===================== 渲染图表 ===================== */
+const byId = Object.fromEntries(DATA.map(d => [d.id, d]));
+const categories = DATA.map(d => ({ name: d.name, itemStyle:{ color:d.color } }));
+const catIndex = Object.fromEntries(DATA.map((d,i) => [d.id, i]));
+
+const nodes = DATA.map(d => {
+  const compCount = d.fields.reduce((a,f)=>a+f.companies.length,0);
+  return {
+    id: d.id, name: d.name,
+    symbolSize: 34 + d.fields.length*3 + compCount*0.6,
+    category: catIndex[d.id],
+    value: d.fields.length + ' 个细分领域',
+  };
+});
+const links = LINKS.map(l => ({
+  source: l.s, target: l.t,
+  label: { show:true, formatter:l.r, fontSize:10, color:'#7f8aa3' },
+}));
+
+const chart = echarts.init(document.getElementById('chart'), null, { renderer:'canvas' });
+chart.setOption({
+  backgroundColor: 'transparent',
+  tooltip: { formatter: p => p.dataType==='node' ? `<b>${p.name}</b><br/>${p.value}　点击查看详情` : `${byId[p.data.source].name} ↔ ${byId[p.data.target].name}` },
+  legend: [{
+    data: categories.map(c=>c.name),
+    textStyle:{ color:'#aeb6c8', fontSize:11 },
+    top: 52, right: 12, orient:'vertical', itemGap:8, itemWidth:12, itemHeight:8,
+  }],
+  series: [{
+    type:'graph', layout:'force', roam:true, draggable:true,
+    data: nodes, links, categories,
+    symbol:'circle',
+    label:{ show:true, position:'right', color:'#e8eaf0', fontSize:12.5, fontWeight:600 },
+    force:{ repulsion: 700, edgeLength:[110, 230], gravity:0.06, friction:0.12 },
+    lineStyle:{ color:'source', curveness:0.12, opacity:0.45, width:1.6 },
+    emphasis:{ focus:'adjacency', scale:true, lineStyle:{ width:3.5, opacity:0.9 }, label:{ fontSize:14 } },
+    autoCurveness: true,
+  }],
+});
+
+window.addEventListener('resize', () => chart.resize());
+
+chart.on('click', p => { if (p.dataType === 'node') openPanel(p.data.id); });
+
+/* ===================== 详情面板 ===================== */
+const panel = document.getElementById('panel');
+function openPanel(id){
+  const d = byId[id];
+  document.getElementById('p-tag').textContent = 'INDUSTRY · 行业';
+  document.getElementById('p-title').textContent = d.name;
+  document.getElementById('p-title').style.color = d.color;
+  document.getElementById('p-intro').textContent = d.intro;
+  const body = document.getElementById('p-body');
+  body.innerHTML = d.fields.map((f,i) => `
+    <div class="field" data-i="${i}">
+      <div class="field-head" onclick="toggleField(this)">
+        <span class="field-name"><span class="dot" style="background:${d.color}"></span>${f.name}</span>
+        <span class="field-meta">${f.companies.length} 家代表公司 <span class="chev">▶</span></span>
+      </div>
+      <div class="field-body"><div class="field-inner">
+        ${f.companies.map(c => {
+          const _tx = TENCENT[c.ticker], _fh = QSYM[c.ticker];
+          const _attr = _tx ? ` data-src="tencent" data-sym="${_tx}"` : (_fh ? ` data-src="finnhub" data-sym="${_fh}"` : '');
+          const _has = _tx || _fh; return `
+          <a class="company" href="${companyURL(c)}" target="_blank" rel="noopener">
+            <div class="c-head">
+              <span class="c-name">${c.name}</span>
+              <span class="ticker">${c.ticker}</span>
+              <span class="loc">${c.loc}</span>
+              <span class="quote"${_attr}>${_has ? '<span class="q-load">···</span>' : '<span class="q-na">—</span>'}</span>
+            </div>
+            <div class="c-desc">${c.desc}</div>
+            <span class="c-link">查看股价 · 新闻 · 财报 ↗</span>
+          </a>`; }).join('')}
+      </div></div>
+    </div>`).join('');
+  panel.classList.add('open');
+}
+function toggleField(el){
+  const field = el.parentElement;
+  field.classList.toggle('open');
+  if (field.classList.contains('open')) loadQuotes(field);
+}
+function closePanel(){ panel.classList.remove('open'); }
+document.addEventListener('keydown', e => { if(e.key==='Escape') closePanel(); });
+
+/* ===================== 实时股价（Finnhub） =====================
+   QSYM: 把数据里的代码映射到 Finnhub 可报价的美股/ADR 代码（美元）。
+   未列出的（A股/港股本地/未上市等）不报价，显示 — 。 */
+const QSYM = {
+  // 美股直接上市
+  'NVDA':'NVDA','AVGO':'AVGO','MSFT':'MSFT','ORCL':'ORCL','CRM':'CRM','SAP':'SAP',
+  'GOOGL':'GOOGL','META':'META','AMZN':'AMZN','AAPL':'AAPL','TSM':'TSM','ASML':'ASML',
+  'CRWD':'CRWD','PANW':'PANW','FTNT':'FTNT','JPM':'JPM','GS':'GS','BLK':'BLK','BX':'BX',
+  'V':'V','MA':'MA','PYPL':'PYPL','XYZ':'XYZ','BRK.B':'BRK.B',
+  'LLY':'LLY','NVO':'NVO','JNJ':'JNJ','PFE':'PFE','AMGN':'AMGN','REGN':'REGN','MRNA':'MRNA',
+  'MDT':'MDT','ISRG':'ISRG','ABT':'ABT','UNH':'UNH','CVS':'CVS',
+  'PG':'PG','KO':'KO','WMT':'WMT','COST':'COST','BABA':'BABA','PDD':'PDD',
+  'MCD':'MCD','NKE':'NKE','SBUX':'SBUX','XOM':'XOM','CVX':'CVX','SLB':'SLB','HAL':'HAL',
+  'FSLR':'FSLR','BA':'BA','LMT':'LMT','CAT':'CAT','DE':'DE','ROK':'ROK','UPS':'UPS','FDX':'FDX',
+  'T':'T','VZ':'VZ','NFLX':'NFLX','DIS':'DIS','CMCSA':'CMCSA','LIN':'LIN','DOW':'DOW',
+  'BHP':'BHP','RIO':'RIO','FCX':'FCX','ALB':'ALB','SQM':'SQM','NEE':'NEE','DUK':'DUK','AWK':'AWK',
+  'PLD':'PLD','EQIX':'EQIX','DLR':'DLR','AMT':'AMT','SPG':'SPG','TSLA':'TSLA','NIO':'NIO',
+  'UBER':'UBER','ADM':'ADM','BG':'BG','CTVA':'CTVA','NTR':'NTR','MDLZ':'MDLZ',
+  // 通过美国 ADR 报价（美元）
+  'HSBA':'HSBC','7203':'TM','6758':'SONY','ABBN':'ABB','NESN':'NSRGY',
+  'MC':'LVMUY','RMS':'HESAY','6954':'FANUY','AIR':'EADSY','SIE':'SIEGY','VWS':'VWDRY',
+  '7974':'NTDOY','BAS':'BASFY','BAYN':'BAYRY','VOW3':'VWAGY',
+  'IBE':'IBDRY','ORSTED':'DNNGY','ALV':'ALIZY',
+};
+// 中国 A股 / 港股：腾讯 qt.gtimg.cn 原生实时（sh/sz=人民币¥, hk=港币HK$），免 Key
+const TENCENT = {
+  '0700.HK':'hk00700','1810.HK':'hk01810','0941.HK':'hk00941',
+  '601398':'sh601398','601318':'sh601318','601012':'sh601012',
+  '300274':'sz300274','002460':'sz002460','300750':'sz300750',
+  '000002':'sz000002','002594':'sz002594',
+};
+const quoteCache = {};
+
+// 点击公司 → 跳转对应财经页（股价 / 新闻 / 财报）
+function companyURL(c){
+  const tx = TENCENT[c.ticker], fh = QSYM[c.ticker];
+  if(tx){
+    return tx.indexOf('hk') === 0
+      ? 'https://quote.eastmoney.com/hk/' + tx.slice(2) + '.html'   // 港股 → 东方财富
+      : 'https://quote.eastmoney.com/' + tx + '.html';             // A股 sh/sz → 东方财富
+  }
+  if(fh) return 'https://finance.yahoo.com/quote/' + fh.replace('.', '-') + '/';   // 美股/ADR → Yahoo Finance
+  return 'https://www.bing.com/search?q=' + encodeURIComponent(c.name + ' 公司 财报 新闻');   // 未上市 → 财经搜索
+}
+
+function getKey(){ return localStorage.getItem('finnhub_key') || ''; }
+function showBanner(){ document.getElementById('key-input').value = getKey(); document.getElementById('key-banner').style.display = 'flex'; }
+function hideBanner(){ document.getElementById('key-banner').style.display = 'none'; }
+function saveKey(){
+  const v = document.getElementById('key-input').value.trim();
+  if(!v) return;
+  localStorage.setItem('finnhub_key', v);
+  hideBanner();
+  refreshOpenQuotes();
+}
+async function fetchQuote(sym){
+  const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${getKey()}`);
+  if(r.status === 429){ const e = new Error('rate'); e.rate = true; throw e; }
+  if(r.status === 401 || r.status === 403){ const e = new Error('auth'); e.auth = true; throw e; }
+  if(!r.ok) throw new Error('http');
+  return r.json();
+}
+// 腾讯行情：fetch 直连（接口返回 CORS *），按 GBK 解码，无需 Key
+async function fetchTencent(sym){
+  const r = await fetch('https://qt.gtimg.cn/q=' + sym);
+  if(!r.ok) throw new Error('http');
+  const buf = await r.arrayBuffer();
+  let txt;
+  try { txt = new TextDecoder('gbk').decode(buf); }
+  catch(_) { txt = new TextDecoder().decode(buf); }
+  const m = txt.match(/="([^"]*)"/);
+  return parseTencent(m ? m[1] : '', sym);
+}
+function parseTencent(raw, sym){
+  if(!raw) return null;
+  const a = raw.split('~');
+  const cur = parseFloat(a[3]), prev = parseFloat(a[4]);   // a[3]=现价 a[4]=昨收
+  if(!isFinite(cur) || cur === 0) return null;
+  const d = isFinite(prev) ? cur - prev : 0;
+  const dp = (isFinite(prev) && prev !== 0) ? d / prev * 100 : 0;
+  return { c: cur, d: d, dp: dp, cur: sym.indexOf('hk') === 0 ? 'HKD' : 'CNY' };
+}
+const CUR_SYM = { USD:'$', CNY:'¥', HKD:'HK$', EUR:'€', JPY:'JP¥', GBP:'£', KRW:'₩' };
+function renderQuote(q, d, cur){
+  if(!d || typeof d.c !== 'number' || d.c === 0){ q.innerHTML = '<span class="q-na">暂无</span>'; return; }
+  cur = cur || 'USD';
+  const sym = CUR_SYM[cur] || '';
+  const up = (d.d || 0) >= 0;
+  q.title = '最新价 ' + sym + d.c + ' ' + cur + '（日内 ' + (up?'+':'') + (d.d||0).toFixed(2) + '）· ' + (cur==='USD' ? 'Finnhub' : '腾讯行情');
+  q.innerHTML = `<span class="q-price">${sym}${d.c.toFixed(2)}</span><span class="q-chg ${up?'up':'down'}">${up?'▲':'▼'} ${Math.abs(d.dp||0).toFixed(2)}%</span>`;
+}
+function applyQuote(q, obj){
+  q.dataset.done = '1';
+  if(!obj){ q.innerHTML = '<span class="q-na">暂无</span>'; return; }
+  renderQuote(q, obj, obj.cur);
+}
+function loadQuotes(field){
+  field.querySelectorAll('.quote[data-sym]').forEach(q=>{
+    if(q.dataset.done === '1') return;
+    const sym = q.dataset.sym;
+    if(quoteCache[sym]){ applyQuote(q, quoteCache[sym]); return; }
+    if(q.dataset.src === 'tencent'){           // A股/港股：腾讯，免 Key
+      fetchTencent(sym)
+        .then(d=>{ if(d) quoteCache[sym] = d; applyQuote(q, d); })
+        .catch(()=>{ q.innerHTML = '<span class="q-na">—</span>'; });
+    } else {                                    // 美股/ADR：Finnhub，需 Key
+      if(!getKey()){ q.innerHTML = '<span class="q-na" style="cursor:pointer" onclick="event.preventDefault();event.stopPropagation();showBanner()">设置 Key 启用</span>'; return; }
+      fetchQuote(sym)
+        .then(d=>{ quoteCache[sym] = d; applyQuote(q, d); })
+        .catch(e=>{ q.innerHTML = '<span class="q-na">' + (e.rate?'限流稍候':e.auth?'Key 无效':'—') + '</span>'; });
+    }
+  });
+}
+function refreshOpenQuotes(){
+  document.querySelectorAll('.field.open').forEach(f=>{
+    f.querySelectorAll('.quote[data-sym]').forEach(q=>{ delete quoteCache[q.dataset.sym]; q.dataset.done = ''; });
+    loadQuotes(f);
+  });
+}
+// 每 60 秒自动刷新当前展开领域的行情
+setInterval(refreshOpenQuotes, 60000);
+// 首次进入若未设置 Key，弹出设置条
+if(!getKey()) showBanner();
+</script>
+</body>
+</html>
