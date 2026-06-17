@@ -145,6 +145,14 @@
   .ov-lab { font-size: 10.5px; color: #6b7488; }
   .ov-val { font-size: 15px; font-weight: 800; color: #e8eaf0; margin-top: 3px; }
 
+  /* 排序 / 筛选控制栏 */
+  .p-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 6px 12px; }
+  .p-controls .ctl-label { font-size: 11px; color: #6b7488; margin-right: 2px; }
+  .p-controls .ctl { font-size: 11.5px; color: #aeb6c8; background: #161c28; border: 1px solid var(--line);
+    padding: 4px 10px; border-radius: 7px; cursor: pointer; }
+  .p-controls .ctl:hover { background: #1d2433; color: #e8eaf0; }
+  .p-controls .ctl.on { background: #2a3850; border-color: #3a4a66; color: #fff; font-weight: 700; }
+
   /* 免责声明 */
   .p-disclaimer { margin: 18px 6px 4px; padding-top: 14px; border-top: 1px solid var(--line);
     font-size: 11px; line-height: 1.7; color: #6b7488; }
@@ -547,6 +555,7 @@ function openPanel(id){
   const body = document.getElementById('p-body');
   // 顶部行业概览卡 + 各领域外壳（领域展开时才抓行情、按市值排序填充）
   body.innerHTML = `<div class="p-overview" id="p-overview">行业概览加载中…</div>`
+    + controlsHTML()
     + d.fields.map((f,i) => `
     <div class="field" data-i="${i}">
       <div class="field-head" onclick="toggleField(this)">
@@ -825,13 +834,43 @@ async function loadIndustry(d){
     + `</div>`;
 }
 
-// 展开领域：并发抓取本领域所有公司行情 → 按总市值降序 → 渲染（含指标与规模条）
+/* ---------- 排序 / 筛选 ---------- */
+let sortKey = 'mcap', marketFilter = 'all';     // 跨行业保持用户偏好
+function marketOf(sym){ return /^(us|uk)/.test(sym) ? 'us' : (/^hk/.test(sym) ? 'hk' : 'cn'); }
+function yearChgFrom(cl){ return (cl && cl.length > 1) ? (cl[cl.length-1]/cl[0] - 1) * 100 : null; }
+function controlsHTML(){
+  const ok = v => v != null && isFinite(v);
+  const sb = (k,l) => `<button class="ctl${sortKey===k?' on':''}" onclick="setSort('${k}')">${l}</button>`;
+  const mb = (k,l) => `<button class="ctl${marketFilter===k?' on':''}" onclick="setMarket('${k}')">${l}</button>`;
+  void ok;
+  return `<div class="p-controls">`
+    + `<span class="ctl-label">排序</span>${sb('mcap','市值')}${sb('pe','PE低→高')}${sb('year','近一年')}${sb('day','当日')}`
+    + `<span class="ctl-label" style="margin-left:8px">市场</span>${mb('all','全部')}${mb('us','美股')}${mb('cn','A股')}${mb('hk','港股')}`
+    + `</div>`;
+}
+function refreshControlsUI(){ const bar = document.querySelector('.p-controls'); if(bar) bar.outerHTML = controlsHTML(); }
+function reRenderOpenFields(){ document.querySelectorAll('.field.open').forEach(f => renderField(f)); }
+function setSort(k){ sortKey = k; refreshControlsUI(); reRenderOpenFields(); }
+function setMarket(k){ marketFilter = k; refreshControlsUI(); reRenderOpenFields(); }
+function cmpRows(x, y){
+  const ok = v => v != null && isFinite(v);
+  let vx, vy, dir;
+  if(sortKey === 'pe'){ vx = x.q && x.q.pe;     vy = y.q && y.q.pe;     dir = 1;  }   // PE 升序：便宜在前
+  else if(sortKey === 'day'){  vx = x.q && x.q.dp; vy = y.q && y.q.dp; dir = -1; }    // 当日涨幅降序
+  else if(sortKey === 'year'){ vx = x.year;       vy = y.year;         dir = -1; }    // 近一年涨幅降序
+  else { vx = x.q && x.q.mcapUsd; vy = y.q && y.q.mcapUsd; dir = -1; }                // 市值降序
+  const ax = ok(vx), ay = ok(vy);
+  if(ax && ay) return dir * (vx - vy);
+  return ax ? -1 : (ay ? 1 : 0);                 // 缺该指标的排在后面
+}
+
+// 展开领域：抓行情 → 按当前“排序/筛选”整理 → 渲染（含指标、规模条、走势图）
 async function renderField(field){
   field.dataset.loaded = '1';
   const inner = field.querySelector('.field-inner');
-  inner.innerHTML = '<div class="q-loading">正在加载行情…</div>';
+  if(!inner.innerHTML) inner.innerHTML = '<div class="q-loading">正在加载行情…</div>';   // 仅首次空白时显示
   const companies = (curD.fields[+field.dataset.i] || {}).companies || [];
-  const rows = await Promise.all(companies.map(async c => {
+  let rows = await Promise.all(companies.map(async c => {
     const sym = quoteSym(c.ticker);
     let q = null;
     if(sym){
@@ -840,13 +879,14 @@ async function renderField(field){
     }
     return { c, sym, q };
   }));
-  rows.sort((x,y) => {                          // 按美元市值降序在前，无市值的保持原序在后
-    const mx = x.q && x.q.mcapUsd, my = y.q && y.q.mcapUsd;
-    if(mx && my) return my - mx;
-    return mx ? -1 : (my ? 1 : 0);
-  });
+  if(marketFilter !== 'all') rows = rows.filter(r => r.sym && marketOf(r.sym) === marketFilter);   // 市场筛选
+  if(sortKey === 'year')                        // 近一年排序需先取K线（已缓存则瞬时）
+    await Promise.all(rows.map(async r => { if(r.sym) r.year = yearChgFrom(await fetchKline(r.sym, r.q)); }));
+  rows.sort(cmpRows);
   const maxMcap = Math.max(1, ...rows.map(r => (r.q && r.q.mcapUsd) || 0));
-  inner.innerHTML = rows.map(r => cardHTML(r.c, r.sym, r.q, maxMcap)).join('');
+  inner.innerHTML = rows.length
+    ? rows.map(r => cardHTML(r.c, r.sym, r.q, maxMcap)).join('')
+    : '<div class="q-loading">（无符合所选市场的公司）</div>';
   rows.forEach(r => { if(r.sym && r.q && typeof r.q.c === 'number') lastPrice[r.sym] = r.q.c; });  // 基线价，首次不闪
   loadSparklines(inner);                       // 异步填充各卡片一年走势图
   markRefreshed();
