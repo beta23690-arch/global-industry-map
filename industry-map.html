@@ -102,6 +102,16 @@
   .q-chg.down { color: #ff6b6b; }
   .q-load { color: #5a6377; letter-spacing: 1px; }
   .q-na { color: #4d5567; font-size: 11px; }
+  .quote { border-radius: 5px; }
+  .quote.flash-up   { animation: qflash-up   .9s ease; }
+  .quote.flash-down { animation: qflash-down .9s ease; }
+  @keyframes qflash-up   { 0% { background: rgba(63,208,127,.38); } 100% { background: transparent; } }
+  @keyframes qflash-down { 0% { background: rgba(255,107,107,.38); } 100% { background: transparent; } }
+
+  /* 刷新状态条 */
+  .p-refresh { margin-top: 12px; font-size: 11px; color: #5a6377; display: none; align-items: center; gap: 6px; }
+  .p-refresh.show { display: inline-flex; }
+  .p-refresh .rdot { color: #3fd07f; font-size: 12px; }
 
   /* API Key 设置条 */
   #key-banner {
@@ -152,6 +162,7 @@
       <span class="p-tag" id="p-tag">INDUSTRY</span>
       <div class="p-title" id="p-title"></div>
       <div class="p-intro" id="p-intro"></div>
+      <div class="p-refresh" id="p-refresh"><span class="rdot">⟳</span><span id="p-refresh-t"></span></div>
     </div>
     <div class="p-body" id="p-body"></div>
   </div>
@@ -547,6 +558,7 @@ function openPanel(id){
           </a>`; }).join('')}
       </div></div>
     </div>`).join('');
+  document.getElementById('p-refresh').classList.remove('show');   // 新行业未加载行情，先隐藏刷新条
   panel.classList.add('open');
 }
 function toggleField(el){
@@ -589,6 +601,7 @@ const TENCENT = {
   '000002':'sz000002','002594':'sz002594',
 };
 const quoteCache = {};
+const lastPrice = {};   // 记录每个标的上次显示的价格，用于刷新时高亮涨跌
 
 // 点击公司 → 跳转对应财经页（股价 / 新闻 / 财报）
 function companyURL(c){
@@ -651,7 +664,23 @@ function renderQuote(q, d, cur){
 function applyQuote(q, obj){
   q.dataset.done = '1';
   if(!obj){ q.innerHTML = '<span class="q-na">暂无</span>'; return; }
+  const sym = q.dataset.sym, prev = lastPrice[sym];
   renderQuote(q, obj, obj.cur);
+  if(typeof obj.c === 'number' && typeof prev === 'number' && obj.c !== prev){
+    const cls = obj.c > prev ? 'flash-up' : 'flash-down';
+    q.classList.remove('flash-up','flash-down');
+    void q.offsetWidth;                       // 强制回流，重启动画
+    q.classList.add(cls);
+  }
+  if(typeof obj.c === 'number') lastPrice[sym] = obj.c;
+  markRefreshed();
+}
+function markRefreshed(){
+  const bar = document.getElementById('p-refresh'), t = document.getElementById('p-refresh-t');
+  if(!bar || !t) return;
+  const n = new Date(), p = x => String(x).padStart(2,'0');
+  t.textContent = '已于 ' + p(n.getHours()) + ':' + p(n.getMinutes()) + ':' + p(n.getSeconds()) + ' 刷新';
+  bar.classList.add('show');
 }
 function loadQuotes(field){
   field.querySelectorAll('.quote[data-sym]').forEach(q=>{
@@ -671,7 +700,9 @@ function loadQuotes(field){
   });
 }
 function refreshOpenQuotes(){
-  document.querySelectorAll('.field.open').forEach(f=>{
+  const open = document.querySelectorAll('.field.open');
+  if(open.length) markRefreshed();            // 证明定时器已触发，即便随后接口无变化/失败
+  open.forEach(f=>{
     f.querySelectorAll('.quote[data-sym]').forEach(q=>{ delete quoteCache[q.dataset.sym]; q.dataset.done = ''; });
     loadQuotes(f);
   });
