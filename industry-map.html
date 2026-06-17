@@ -129,6 +129,22 @@
     background: #fff; transform: translate(-50%,-50%); box-shadow: 0 0 0 2px rgba(91,143,249,.45); }
   .c-range .r-pos { color: #aeb6c8; font-weight: 700; min-width: 30px; text-align: right; }
 
+  /* 一年走势迷你图 */
+  .c-spark { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .c-spark .spark { flex: none; border-radius: 3px; }
+  .spark-chg { font-size: 11px; font-weight: 700; }
+  .spark-chg.up { color: #3fd07f; }
+  .spark-chg.down { color: #ff6b6b; }
+
+  /* 行业概览卡 */
+  .p-overview { margin: 4px 6px 14px; padding: 13px 15px; border: 1px solid var(--line);
+    border-radius: 12px; background: linear-gradient(135deg, rgba(91,143,249,.10), rgba(91,143,249,.03)); }
+  .ov-title { font-size: 11.5px; color: var(--muted); margin-bottom: 10px; letter-spacing: .3px; }
+  .ov-grid { display: flex; gap: 10px; }
+  .ov-tile { flex: 1; min-width: 0; }
+  .ov-lab { font-size: 10.5px; color: #6b7488; }
+  .ov-val { font-size: 15px; font-weight: 800; color: #e8eaf0; margin-top: 3px; }
+
   /* 免责声明 */
   .p-disclaimer { margin: 18px 6px 4px; padding-top: 14px; border-top: 1px solid var(--line);
     font-size: 11px; line-height: 1.7; color: #6b7488; }
@@ -529,8 +545,9 @@ function openPanel(id){
   document.getElementById('p-title').style.color = d.color;
   document.getElementById('p-intro').textContent = d.intro;
   const body = document.getElementById('p-body');
-  // 领域只渲染外壳，展开时才抓行情并按市值排序填充（field-inner 先留空）
-  body.innerHTML = d.fields.map((f,i) => `
+  // 顶部行业概览卡 + 各领域外壳（领域展开时才抓行情、按市值排序填充）
+  body.innerHTML = `<div class="p-overview" id="p-overview">行业概览加载中…</div>`
+    + d.fields.map((f,i) => `
     <div class="field" data-i="${i}">
       <div class="field-head" onclick="toggleField(this)">
         <span class="field-name"><span class="dot" style="background:${d.color}"></span>${f.name}</span>
@@ -541,6 +558,7 @@ function openPanel(id){
     + `<div class="p-disclaimer">市值已折算美元、仅供跨市场比较；价格与估值来自公开行情，可能延迟或偏差。<b>本页仅供学习与研究参考，不构成任何投资建议，请自行判断 (DYOR)。</b></div>`;
   document.getElementById('p-refresh').classList.remove('show');   // 新行业未加载行情，先隐藏刷新条
   panel.classList.add('open');
+  loadIndustry(d);                              // 批量抓全行业行情 → 概览卡 + 暖缓存
 }
 function toggleField(el){
   const field = el.parentElement;
@@ -625,6 +643,24 @@ async function fetchTencent(sym){
   const m = txt.match(/="([^"]*)"/);
   return parseTencent(m ? m[1] : '', sym);
 }
+// 批量取行情：一次请求多只（用逗号分隔），返回 { sym: 行情对象 }
+async function fetchTencentBatch(syms){
+  const out = {};
+  if(!syms.length) return out;
+  // 分块，避免 URL 过长
+  for(let i=0; i<syms.length; i+=40){
+    const part = syms.slice(i, i+40);
+    try{
+      const r = await fetch('https://qt.gtimg.cn/q=' + part.join(','));
+      const txt = new TextDecoder('gbk').decode(await r.arrayBuffer());
+      for(const line of txt.split('\n')){
+        const m = line.match(/v_([^=]+)="([^"]*)"/);
+        if(m && m[2]){ const q = parseTencent(m[2], m[1]); if(q) out[m[1]] = q; }
+      }
+    }catch(_){ /* 该块失败则跳过，仍返回已成功的 */ }
+  }
+  return out;
+}
 function parseTencent(raw, sym){
   if(!raw) return null;
   const a = raw.split('~');
@@ -633,7 +669,8 @@ function parseTencent(raw, sym){
   const d = isFinite(prev) ? cur - prev : 0;
   const dp = (isFinite(prev) && prev !== 0) ? d / prev * 100 : 0;
   const us = /^us/.test(sym), uk = /^uk/.test(sym), hk = /^hk/.test(sym);
-  const o = { c: cur, d: d, dp: dp, cur: (us||uk) ? 'USD' : (hk ? 'HKD' : 'CNY'),
+  const o = { c: cur, d: d, dp: dp, code: a[2] || '',   // a[2]=交易所原生代码（如 AAPL.OQ），推东财 secid 用
+              cur: (us||uk) ? 'USD' : (hk ? 'HKD' : 'CNY'),
               pe:null, mcap:null, mcapUsd:null, hi52:null, lo52:null };
   // 估值/市值/52周字段：各市场下标略不同。uk（三星 GDR）这些字段不可靠，直接跳过。
   if(!uk){
@@ -695,6 +732,7 @@ function cardHTML(c, sym, q, maxMcap){
       </div>
       ${size}
       <div class="c-metrics">${metricsHTML(q)}</div>
+      ${sym ? `<div class="c-spark" data-spark="${sym}"></div>` : ''}
       <div class="c-desc">${c.desc}</div>
       <span class="c-link">查看股价 · 新闻 · 财报 ↗</span>
     </a>`;
@@ -719,6 +757,74 @@ function markRefreshed(){
   t.textContent = '已于 ' + p(n.getHours()) + ':' + p(n.getMinutes()) + ':' + p(n.getSeconds()) + ' 刷新';
   bar.classList.add('show');
 }
+/* ---------- 一年走势迷你图 ---------- */
+const klineCache = {};                       // sym → 近一年收盘价数组（或 null）
+// 取近一年日收盘——全部走腾讯 ifzq（A股/港股已证明浏览器可用的全球 CDN）。
+// A股/港股用原代码；美股/ADR 用「前缀 + 交易所代码」（如 usAAPL.OQ、usBRK.B.N），代码取自行情 a[2]=q.code。
+async function fetchKline(sym, q){
+  if(klineCache[sym] !== undefined) return klineCache[sym];
+  let closes = null;
+  try{
+    let param = sym;
+    if(/^(us|uk)/.test(sym)){
+      if(!q || !q.code){ klineCache[sym] = null; return null; }
+      param = sym.slice(0, 2) + q.code;                 // usAAPL → us + AAPL.OQ
+    }
+    const j = await (await fetch(`https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${param},day,,,260,qfq`)).json();
+    const node = (j && j.data) ? (j.data[param] || Object.values(j.data).find(v => v && (v.qfqday || v.day))) : null;
+    const arr = node && (node.qfqday || node.day);
+    if(arr) closes = arr.map(r => parseFloat(r[2])).filter(isFinite);
+  }catch(_){ closes = null; }
+  if(closes && closes.length < 5) closes = null;        // 数据太少不画（如三星 GDR 无历史）
+  klineCache[sym] = closes;
+  return closes;
+}
+// 收盘价数组 → 迷你折线 SVG（涨绿跌红，带浅色面积）
+function sparklineSVG(closes){
+  const n = closes.length, W = 132, H = 30, pad = 2;
+  let lo = Math.min(...closes), hi = Math.max(...closes);
+  if(hi === lo) hi = lo + 1;
+  const x = i => pad + i / (n - 1) * (W - 2 * pad);
+  const y = v => pad + (1 - (v - lo) / (hi - lo)) * (H - 2 * pad);
+  const pts = closes.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const up = closes[n - 1] >= closes[0], col = up ? '#3fd07f' : '#ff6b6b';
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" preserveAspectRatio="none">`
+       + `<polyline points="${pad},${H-pad} ${pts} ${W-pad},${H-pad}" fill="${col}" opacity="0.12"/>`
+       + `<polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
+}
+// 给容器内所有卡片异步填充走势图（拿不到则移除占位）
+function loadSparklines(container){
+  container.querySelectorAll('.c-spark[data-spark]').forEach(async slot => {
+    const sym = slot.dataset.spark;
+    const closes = await fetchKline(sym, quoteCache[sym]);
+    if(!closes){ slot.remove(); return; }
+    const chg = (closes[closes.length - 1] / closes[0] - 1) * 100, up = chg >= 0;
+    slot.innerHTML = sparklineSVG(closes)
+      + `<span class="spark-chg ${up?'up':'down'}">近一年 ${up?'+':''}${chg.toFixed(1)}%</span>`;
+  });
+}
+
+/* ---------- 行业概览卡 ---------- */
+// 打开行业时：一次批量抓全行业行情 → 暖缓存 + 渲染概览（总市值 / 中位 PE / 年内位置）
+async function loadIndustry(d){
+  const syms = [...new Set(d.fields.flatMap(f => f.companies.map(c => quoteSym(c.ticker)).filter(Boolean)))];
+  const map = await fetchTencentBatch(syms);
+  Object.assign(quoteCache, map);
+  const el = document.getElementById('p-overview');
+  if(!el || curD !== d) return;                          // 已切换到别的行业则放弃
+  const qs = syms.map(s => quoteCache[s]).filter(Boolean);
+  const median = arr => { const a = arr.filter(v => v != null).sort((x,y)=>x-y); return a.length ? a[Math.floor(a.length/2)] : null; };
+  const totalUsd = qs.reduce((a,q) => a + (q.mcapUsd || 0), 0);
+  const medPe = median(qs.map(q => q.pe).filter(v => v > 0));
+  const medPos = median(qs.map(q => (q.hi52 && q.lo52 && q.hi52 > q.lo52) ? (q.c - q.lo52)/(q.hi52 - q.lo52)*100 : null));
+  const tile = (lab, val) => `<div class="ov-tile"><div class="ov-lab">${lab}</div><div class="ov-val">${val}</div></div>`;
+  el.innerHTML = `<div class="ov-title">行业概览 · ${qs.length} 只成分股有行情</div><div class="ov-grid">`
+    + tile('总市值', totalUsd ? fmtMcapUsd(totalUsd, false) : '—')
+    + tile('中位 PE', medPe != null ? medPe.toFixed(1) : '—')
+    + tile('年内位置', medPos != null ? Math.round(medPos) + '%' : '—')
+    + `</div>`;
+}
+
 // 展开领域：并发抓取本领域所有公司行情 → 按总市值降序 → 渲染（含指标与规模条）
 async function renderField(field){
   field.dataset.loaded = '1';
@@ -742,6 +848,7 @@ async function renderField(field){
   const maxMcap = Math.max(1, ...rows.map(r => (r.q && r.q.mcapUsd) || 0));
   inner.innerHTML = rows.map(r => cardHTML(r.c, r.sym, r.q, maxMcap)).join('');
   rows.forEach(r => { if(r.sym && r.q && typeof r.q.c === 'number') lastPrice[r.sym] = r.q.c; });  // 基线价，首次不闪
+  loadSparklines(inner);                       // 异步填充各卡片一年走势图
   markRefreshed();
 }
 function refreshOpenQuotes(){
