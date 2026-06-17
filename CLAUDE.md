@@ -25,7 +25,7 @@ The single `<script>` is organized top-to-bottom into these regions (search the 
 1. **Content model — `DATA`** (~line 175): an array of 12 industries, each `{ id, name, color, intro, fields:[{ name, companies:[{ name, ticker, loc, desc }] }] }`. This is the source of truth for every node, accordion, and company card.
 2. **Cross-industry edges — `LINKS`** (~line 465): `{s, t, r}` = source id, target id, relation label. These become the labeled lines between industry nodes.
 3. **Chart rendering** (~line 485): `DATA`/`LINKS` are transformed into ECharts `nodes`/`links` (node size scales with field + company counts) and rendered as a force-directed `graph`. Clicking a node calls `openPanel(id)`.
-4. **Detail panel** (~line 530): `openPanel` builds the slide-out HTML from `DATA`; `toggleField` expands an accordion field and triggers `loadQuotes` for the companies in it.
+4. **Detail panel** (~line 530): `openPanel` renders only the field *shells* (empty `.field-inner`) and stashes the industry in `curD`. Expanding a field calls `renderField` (lazy, once): it fetches **all** the field's quotes in parallel, **sorts companies by USD market cap (desc)**, then builds each card via `cardHTML` — name/ticker/price badge **plus a market-cap size bar and a metrics row (市值 / PE / 52-week position)**. Companies with no quote (未上市, no mapping) sort to the bottom and show `—`.
 5. **Real-time quotes** (~line 572 onward) — see below.
 
 ### The quote system (the non-obvious part)
@@ -38,13 +38,13 @@ The single `<script>` is organized top-to-bottom into these regions (search the 
 - **`QSYM_OVR`** (`ticker` → full gtimg code): one-off exceptions whose home exchange gtimg can't quote, e.g. Samsung `005930` → `ukSMSN` (its London GDR, USD, live-moving).
 - **`QSYM`** (`ticker` → US/ADR symbol, *without* the `us` prefix): US stocks and overseas ADRs. `quoteSym` prepends `us` (`NVDA`→`usNVDA`, `NESN`→`usNSRGY`). Most European/Japanese names quote through their US OTC ADR here.
 
-A ticker matching none of the three → no `data-sym` attr → price shows `—` (e.g. Saudi Aramco `2222`, and all 未上市 names). `parseTencent` sets currency from the symbol prefix: `us`/`uk`→USD, `hk`→HKD, else CNY. `loadQuotes` reads each `.quote` element's `data-sym` and fetches via the single tencent path. `companyURL()` routes the card click-through (US/ADR → Yahoo Finance, A/HK → 东方财富, `QSYM_OVR` 6-digit → Yahoo home listing e.g. `005930.KS`, unlisted → Bing). Currency symbol per market via `CUR_SYM`.
+A ticker matching none of the three → no `data-sym` attr → card shows `—` (e.g. Saudi Aramco `2222`, and all 未上市 names). `parseTencent` returns not just price/change but also **`pe`, `mcap` (local 亿), `mcapUsd`, `hi52`, `lo52`** — pulled from market-specific field indices (US/ADR & HK vs A-share differ by one; the `uk` Samsung GDR has unreliable valuation fields so they're **skipped**). `mcapUsd = mcap × FX_USD[cur]` (static approx rates — HKD pegged, CNY stable) so caps are comparable across currencies for **sorting, the size bar, and display** (non-USD shown as `≈$…` via `fmtMcapUsd`). `companyURL()` routes the card click-through (US/ADR → Yahoo Finance, A/HK → 东方财富, `QSYM_OVR` 6-digit → Yahoo home listing e.g. `005930.KS`, unlisted → Bing). Price-badge currency symbol per market via `CUR_SYM`.
 
 **To add a company with a working live price you must do two things**: add it to `DATA`, *and* add its `ticker`→symbol entry to the right table (`QSYM` for US/ADR, `TENCENT` for A/HK, `QSYM_OVR` for an exotic exception). Quick way to find a working symbol: `node -e "fetch('https://qt.gtimg.cn/q=usTICKER').then(r=>r.arrayBuffer()).then(b=>console.log(new TextDecoder('gbk').decode(b)))"` — non-empty `v_...="200~..."` means it quotes. Without a mapping the card renders but the price shows `—`.
 
 ### Refresh & flash
 
-`setInterval(refreshOpenQuotes, 60000)` refreshes only **expanded** fields (`.field.open`): it clears `quoteCache` and re-fetches. `markRefreshed()` updates the panel's "已于 HH:MM:SS 刷新" status bar each cycle (proof the timer ran, even when markets are closed and prices don't move). `lastPrice` holds the previously shown price per symbol so `applyQuote` can flash a quote green/red on change (no flash on first load).
+`setInterval(refreshOpenQuotes, 60000)` refreshes only **expanded** fields (`.field.open`): per `.company[data-sym]` it clears `quoteCache`, re-fetches, and updates badge + metrics **in place** via `applyCardQuote` (no re-sort, so cards don't jump). `markRefreshed()` updates the panel's "已于 HH:MM:SS 刷新" status bar each cycle (proof the timer ran, even when markets are closed and prices don't move). `lastPrice` holds the previously shown price per symbol so `applyCardQuote` can flash a quote green/red on change (no flash on first load).
 
 ## Constraints & gotchas
 
