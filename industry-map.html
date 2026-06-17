@@ -113,48 +113,15 @@
   .p-refresh.show { display: inline-flex; }
   .p-refresh .rdot { color: #3fd07f; font-size: 12px; }
 
-  /* API Key 设置条 */
-  #key-banner {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 40;
-    display: none; align-items: center; gap: 10px; flex-wrap: wrap;
-    padding: 11px 18px; background: #1b2536; border-bottom: 1px solid #2c3950;
-    box-shadow: 0 8px 24px rgba(0,0,0,.4); font-size: 13px;
-  }
-  #key-banner b { color: #5B8FF9; }
-  #key-banner .kb-text { color: #c7cdda; }
-  #key-banner a { color: #61DDAA; text-decoration: none; }
-  #key-banner a:hover { text-decoration: underline; }
-  #key-input {
-    flex: 1; min-width: 180px; max-width: 360px;
-    background: #0e131d; border: 1px solid #2c3950; color: #e8eaf0;
-    padding: 7px 11px; border-radius: 8px; font-size: 13px; outline: none;
-  }
-  #key-input:focus { border-color: #5B8FF9; }
-  .kb-btn { background: #5B8FF9; color: #fff; border: none; cursor: pointer; padding: 7px 15px; border-radius: 8px; font-size: 13px; font-weight: 600; }
-  .kb-btn.ghost { background: #2a3850; }
-  #gear {
-    position: fixed; bottom: 14px; right: 18px; z-index: 6;
-    width: 38px; height: 38px; border-radius: 10px;
-    background: #1b2536; border: 1px solid #2c3950; color: #aeb6c8;
-    cursor: pointer; font-size: 17px; line-height: 1;
-  }
-  #gear:hover { color: #fff; background: #243049; }
 </style>
 </head>
 <body>
-  <div id="key-banner">
-    <span class="kb-text">💹 <b>美股</b>实时价需要免费 Finnhub Key（A股/港股已免 Key 直连）：<a href="https://finnhub.io/register" target="_blank">点此 1 分钟注册获取 →</a></span>
-    <input id="key-input" type="text" placeholder="在此粘贴 Finnhub API Key" />
-    <button class="kb-btn" onclick="saveKey()">保存并启用</button>
-    <button class="kb-btn ghost" onclick="hideBanner()">稍后</button>
-  </div>
   <div id="topbar">
     <h1>🌐 全球行业关系图</h1>
     <span class="hint">点击行业节点查看细分领域与代表公司 · 可拖动节点 / 滚轮缩放</span>
   </div>
   <div id="chart"></div>
-  <div class="legend-note">实时股价：美股/ADR 由 Finnhub（$）· A股/港股 由腾讯（¥/HK$，免Key）· 每 60 秒刷新 · 未上市标的显示 —</div>
-  <button id="gear" title="设置 / 更换 API Key" onclick="showBanner()">⚙</button>
+  <div class="legend-note">实时股价：腾讯行情免 Key 直连 · 美股/ADR（$）· A股（¥）· 港股（HK$）· 每 60 秒刷新 · 未上市标的显示 —</div>
 
   <div id="panel">
     <div class="p-head">
@@ -543,9 +510,9 @@ function openPanel(id){
       </div>
       <div class="field-body"><div class="field-inner">
         ${f.companies.map(c => {
-          const _tx = TENCENT[c.ticker], _fh = QSYM[c.ticker];
-          const _attr = _tx ? ` data-src="tencent" data-sym="${_tx}"` : (_fh ? ` data-src="finnhub" data-sym="${_fh}"` : '');
-          const _has = _tx || _fh; return `
+          const _sym = quoteSym(c.ticker);
+          const _attr = _sym ? ` data-sym="${_sym}"` : '';
+          const _has = !!_sym; return `
           <a class="company" href="${companyURL(c)}" target="_blank" rel="noopener">
             <div class="c-head">
               <span class="c-name">${c.name}</span>
@@ -569,9 +536,12 @@ function toggleField(el){
 function closePanel(){ panel.classList.remove('open'); }
 document.addEventListener('keydown', e => { if(e.key==='Escape') closePanel(); });
 
-/* ===================== 实时股价（Finnhub） =====================
-   QSYM: 把数据里的代码映射到 Finnhub 可报价的美股/ADR 代码（美元）。
-   未列出的（A股/港股本地/未上市等）不报价，显示 — 。 */
+/* ===================== 实时股价（全部走腾讯 qt.gtimg.cn，免 Key） =====================
+   全站统一一个数据源：腾讯行情，返回 CORS *、按 GBK 解码、字段 a[3]=现价 a[4]=昨收。
+   - QSYM:     数据里的代码 → 美股/ADR 符号；查询时自动加 us 前缀（如 NVDA→usNVDA、NESN→usNSRGY），美元计价。
+   - TENCENT:  A股/港股 → 腾讯原生代码（sh/sz=¥、hk=HK$）。
+   - QSYM_OVR: 个别特例（本土无美股、只有伦敦 GDR 等）直接给完整腾讯代码。
+   三者都未命中的（沙特阿美、未上市等）不报价，显示 — 。 */
 const QSYM = {
   // 美股直接上市
   'NVDA':'NVDA','AVGO':'AVGO','MSFT':'MSFT','ORCL':'ORCL','CRM':'CRM','SAP':'SAP',
@@ -590,8 +560,12 @@ const QSYM = {
   // 通过美国 ADR 报价（美元）
   'HSBA':'HSBC','7203':'TM','6758':'SONY','ABBN':'ABB','NESN':'NSRGY',
   'MC':'LVMUY','RMS':'HESAY','6954':'FANUY','AIR':'EADSY','SIE':'SIEGY','VWS':'VWDRY',
-  '7974':'NTDOY','BAS':'BASFY','BAYN':'BAYRY','VOW3':'VWAGY',
+  '7974':'NTDOY','BAS':'BASFY','BAYN':'BAYRY','VOW3':'VWAGY','ENR':'SMEGF',
   'IBE':'IBDRY','ORSTED':'DNNGY','ALV':'ALIZY',
+};
+// 特例：本土交易所无美股、仅有其他海外挂牌的，直接给完整腾讯代码
+const QSYM_OVR = {
+  '005930':'ukSMSN',   // 三星电子：伦敦上市 GDR（美元，实时跳动；绝对价为 GDR 报价，走势同首尔本股）
 };
 // 中国 A股 / 港股：腾讯 qt.gtimg.cn 原生实时（sh/sz=人民币¥, hk=港币HK$），免 Key
 const TENCENT = {
@@ -603,35 +577,29 @@ const TENCENT = {
 const quoteCache = {};
 const lastPrice = {};   // 记录每个标的上次显示的价格，用于刷新时高亮涨跌
 
+// 数据里的代码 → 腾讯行情查询代码（命中才报价）
+function quoteSym(ticker){
+  if(TENCENT[ticker])   return TENCENT[ticker];        // A股/港股：腾讯原生代码
+  if(QSYM_OVR[ticker])  return QSYM_OVR[ticker];        // 特例（如三星伦敦 GDR）
+  if(QSYM[ticker])      return 'us' + QSYM[ticker];     // 美股/ADR：加 us 前缀
+  return '';
+}
+
 // 点击公司 → 跳转对应财经页（股价 / 新闻 / 财报）
 function companyURL(c){
-  const tx = TENCENT[c.ticker], fh = QSYM[c.ticker];
+  const tx = TENCENT[c.ticker];
   if(tx){
     return tx.indexOf('hk') === 0
       ? 'https://quote.eastmoney.com/hk/' + tx.slice(2) + '.html'   // 港股 → 东方财富
       : 'https://quote.eastmoney.com/' + tx + '.html';             // A股 sh/sz → 东方财富
   }
+  if(QSYM_OVR[c.ticker] && /^\d{6}$/.test(c.ticker))               // 三星等：跳回本土（首尔）个股页
+    return 'https://finance.yahoo.com/quote/' + c.ticker + '.KS/';
+  const fh = QSYM[c.ticker];
   if(fh) return 'https://finance.yahoo.com/quote/' + fh.replace('.', '-') + '/';   // 美股/ADR → Yahoo Finance
   return 'https://www.bing.com/search?q=' + encodeURIComponent(c.name + ' 公司 财报 新闻');   // 未上市 → 财经搜索
 }
 
-function getKey(){ return localStorage.getItem('finnhub_key') || ''; }
-function showBanner(){ document.getElementById('key-input').value = getKey(); document.getElementById('key-banner').style.display = 'flex'; }
-function hideBanner(){ document.getElementById('key-banner').style.display = 'none'; }
-function saveKey(){
-  const v = document.getElementById('key-input').value.trim();
-  if(!v) return;
-  localStorage.setItem('finnhub_key', v);
-  hideBanner();
-  refreshOpenQuotes();
-}
-async function fetchQuote(sym){
-  const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${getKey()}`);
-  if(r.status === 429){ const e = new Error('rate'); e.rate = true; throw e; }
-  if(r.status === 401 || r.status === 403){ const e = new Error('auth'); e.auth = true; throw e; }
-  if(!r.ok) throw new Error('http');
-  return r.json();
-}
 // 腾讯行情：fetch 直连（接口返回 CORS *），按 GBK 解码，无需 Key
 async function fetchTencent(sym){
   const r = await fetch('https://qt.gtimg.cn/q=' + sym);
@@ -650,7 +618,7 @@ function parseTencent(raw, sym){
   if(!isFinite(cur) || cur === 0) return null;
   const d = isFinite(prev) ? cur - prev : 0;
   const dp = (isFinite(prev) && prev !== 0) ? d / prev * 100 : 0;
-  return { c: cur, d: d, dp: dp, cur: sym.indexOf('hk') === 0 ? 'HKD' : 'CNY' };
+  return { c: cur, d: d, dp: dp, cur: /^u[sk]/.test(sym) ? 'USD' : (sym.indexOf('hk') === 0 ? 'HKD' : 'CNY') };
 }
 const CUR_SYM = { USD:'$', CNY:'¥', HKD:'HK$', EUR:'€', JPY:'JP¥', GBP:'£', KRW:'₩' };
 function renderQuote(q, d, cur){
@@ -658,7 +626,7 @@ function renderQuote(q, d, cur){
   cur = cur || 'USD';
   const sym = CUR_SYM[cur] || '';
   const up = (d.d || 0) >= 0;
-  q.title = '最新价 ' + sym + d.c + ' ' + cur + '（日内 ' + (up?'+':'') + (d.d||0).toFixed(2) + '）· ' + (cur==='USD' ? 'Finnhub' : '腾讯行情');
+  q.title = '最新价 ' + sym + d.c.toFixed(2) + ' ' + cur + '（日内 ' + (up?'+':'') + (d.d||0).toFixed(2) + '）· 腾讯行情';
   q.innerHTML = `<span class="q-price">${sym}${d.c.toFixed(2)}</span><span class="q-chg ${up?'up':'down'}">${up?'▲':'▼'} ${Math.abs(d.dp||0).toFixed(2)}%</span>`;
 }
 function applyQuote(q, obj){
@@ -687,16 +655,9 @@ function loadQuotes(field){
     if(q.dataset.done === '1') return;
     const sym = q.dataset.sym;
     if(quoteCache[sym]){ applyQuote(q, quoteCache[sym]); return; }
-    if(q.dataset.src === 'tencent'){           // A股/港股：腾讯，免 Key
-      fetchTencent(sym)
-        .then(d=>{ if(d) quoteCache[sym] = d; applyQuote(q, d); })
-        .catch(()=>{ q.innerHTML = '<span class="q-na">—</span>'; });
-    } else {                                    // 美股/ADR：Finnhub，需 Key
-      if(!getKey()){ q.innerHTML = '<span class="q-na" style="cursor:pointer" onclick="event.preventDefault();event.stopPropagation();showBanner()">设置 Key 启用</span>'; return; }
-      fetchQuote(sym)
-        .then(d=>{ quoteCache[sym] = d; applyQuote(q, d); })
-        .catch(e=>{ q.innerHTML = '<span class="q-na">' + (e.rate?'限流稍候':e.auth?'Key 无效':'—') + '</span>'; });
-    }
+    fetchTencent(sym)                            // 全部走腾讯，免 Key
+      .then(d=>{ if(d) quoteCache[sym] = d; applyQuote(q, d); })
+      .catch(()=>{ q.innerHTML = '<span class="q-na">—</span>'; });
   });
 }
 function refreshOpenQuotes(){
@@ -709,8 +670,6 @@ function refreshOpenQuotes(){
 }
 // 每 60 秒自动刷新当前展开领域的行情
 setInterval(refreshOpenQuotes, 60000);
-// 首次进入若未设置 Key，弹出设置条
-if(!getKey()) showBanner();
 </script>
 </body>
 </html>
